@@ -1,0 +1,14 @@
+# Object files
+*.o
+
+# Executables (common names)
+a.out
+miniShell
+*.exe
+
+# Backup files
+*~
+*.swp
+
+# Logs
+*.log
