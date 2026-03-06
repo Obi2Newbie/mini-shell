@@ -11,9 +11,9 @@
 
 #define MAX_JOBS 100
 
-/***
+/*
 pwd() retrieves the current working directory into a PATH_MAX-sized buffer using getcwd() and prints it to stdout as "Current working directory: ". If getcwd() fails it prints "Cannot get current working directory path" to stderr and returns.
-***/
+*/
 void pwd()
 {
     // Buffer to store the current working directory path
@@ -29,10 +29,11 @@ void pwd()
 }
 
 // Structure that represents a background job
-typedef struct {
-    pid_t pid;                 // Process ID of the job
-    char command[PATH_MAX];    // Command that started the process
-    int is_active;             // 1 if the process is still running, 0 if it finished
+typedef struct
+{
+    pid_t pid;              // Process ID of the job
+    char command[PATH_MAX]; // Command that started the process
+    int is_active;          // 1 if the process is still running, 0 if it finished
 } Job;
 
 // Array that stores all jobs
@@ -41,23 +42,25 @@ Job jobList[MAX_JOBS];
 // Number of jobs currently stored in the list
 int jobCount = 0;
 
-
 // Function to display all jobs (internal shell command like `jobs`)
-void displayJobs() {
+void displayJobs()
+{
 
     // Print table header
     printf("\nID\tPID\tStatus\t\tCommand\n");
 
     // Loop through all stored jobs
-    for (int i = 0; i < jobCount; i++) {
+    for (int i = 0; i < jobCount; i++)
+    {
 
         // Print job information
-        printf("[%d]\t%d\t%s\t%s\n", 
-               i + 1,                     // Job ID (index + 1 for user-friendly numbering)
-               jobList[i].pid,            // Process ID
-               jobList[i].is_active ?     // Check if job is active
-               "Running" : "Finished",    // Display status
-               jobList[i].command);       // Command used to start the job
+        printf("[%d]\t%d\t%s\t%s\n",
+               i + 1,                 // Job ID (index + 1 for user-friendly numbering)
+               jobList[i].pid,        // Process ID
+               jobList[i].is_active ? // Check if job is active
+                   "Running"
+                                    : "Finished", // Display status
+               jobList[i].command);               // Command used to start the job
     }
 }
 
@@ -66,8 +69,6 @@ int main()
     // Buffer that stores the raw command entered by the user
     char userInput[PATH_MAX];
     // lastChar: used to detect '&' for background execution
-    // command: first token of the user input (the command itself)
-    // argument: second token (argument to the command)
     char lastChar, *command, *argument;
     // Flag indicating whether the command should run in background
     bool backgroundFlag = false;
@@ -129,7 +130,7 @@ int main()
             printf("\nHelp Menu:\n");
             printf("- Prefix external commands with \"!\"\n");
             printf("- Run background commands with \"&\"\n");
-            printf("- Type \"exit\" to quit\n\n");
+            printf("- Type \"exit\" to quit\n");
             printf("- cd,\n- pwd,\n- mkdir,\n- exit,\n- jobs\n");
         }
 
@@ -178,6 +179,41 @@ int main()
         else if (strcmp(command, "jobs") == 0)
         {
             displayJobs();
+        }
+        // Check if the command starts with '!' (used to execute a system command)
+        else if (command[0] == '!')
+        {
+            // Skip the '!' character to get the real command
+            char *newCommand = command + 1;
+
+            // Create the argument list for execvp
+            // newCommand = program name, argument = optional parameter, NULL terminates the array
+            char *args[] = {newCommand, argument, NULL};
+
+            // Create a new process
+            int pid = fork();
+
+            // Check if fork failed
+            if (pid < 0)
+            {
+                perror("fork failed"); // Print error message
+            }
+            // Child process
+            else if (pid == 0)
+            {
+                // Replace the child process with the new program
+                execvp(newCommand, args);
+
+                // If execvp returns, it means it failed
+                perror("execvp failed");
+                break;
+            }
+            // Parent process
+            else
+            {
+                // Wait for the child process to finish execution
+                wait(NULL);
+            }
         }
         else
         {
