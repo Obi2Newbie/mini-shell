@@ -8,8 +8,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <linux/limits.h>
 
 #define MAX_JOBS 100
+#define ARGS_LIMIT 10
 
 /*
 pwd() retrieves the current working directory into a PATH_MAX-sized buffer using getcwd() and prints it to stdout as "Current working directory: ". If getcwd() fails it prints "Cannot get current working directory path" to stderr and returns.
@@ -31,7 +33,7 @@ void pwd()
 // Structure that represents a background job
 typedef struct
 {
-    pid_t pid;              // Process ID of the job
+    int pid;                // Process ID of the job
     char command[PATH_MAX]; // Command that started the process
     int is_active;          // 1 if the process is still running, 0 if it finished
 } Job;
@@ -69,11 +71,14 @@ int main()
     // Buffer that stores the raw command entered by the user
     char userInput[PATH_MAX];
     // lastChar: used to detect '&' for background execution
-    char lastChar, *command, *argument;
+    // command: pointer to the main command entered by the user
+    // argument: array of pointers to store the command arguments
+    // ARGS_LIMIT defines the maximum number of arguments allowed
+    char lastChar, *command, *argument[ARGS_LIMIT];
     // Flag indicating whether the command should run in background
     bool backgroundFlag = false;
     // Stores the length of the user input string
-    int stringLen = 0;
+    int stringLen = 0, argsLen = 0;
 
     printf("Input your command.\n");
     printf("To stop the mini shell, type \"exit\"\n");
@@ -121,7 +126,12 @@ int main()
         // Split the user input into tokens using space as delimiter
         // First token is the command
         command = strtok(userInput, " ");
-        argument = strtok(NULL, " ");
+        // Continue splitting the rest of the input into arguments
+        // Each token is stored in the argument array
+        while ((argument[argsLen] = strtok(NULL, " ")) != NULL)
+        {
+            argsLen++; // Move to the next argument position
+        }
 
         // Compare the command entered by the user with supported commands
         // We use string compare to check what the command the user has inputted
@@ -137,12 +147,12 @@ int main()
         else if (strcmp(command, "cd") == 0)
         {
             // Check if the user has not inserted a path, if so the program output an error
-            if (argument == NULL)
+            if (argument[0] == NULL)
             {
                 printf("Error: cd require a path\n");
             }
             // Execute the change directory method and also check for error
-            else if (chdir(argument) != 0)
+            else if (chdir(argument[0]) != 0)
             {
                 perror("cd failed");
                 continue;
@@ -160,12 +170,12 @@ int main()
         {
             // Check if the user provided a directory name argument
             // If no argument is given, print an error message
-            if (argument == NULL)
+            if (argument[0] == NULL)
             {
                 fprintf(stderr, "Error: mkdir requires a directory name\n");
             }
             // Attempt to create the new directory and set the standard read/write/execute (0777) permissions
-            else if (mkdir(argument, 0777) != 0)
+            else if (mkdir(argument[0], 0777) != 0)
             {
                 // If mkdir fails, print the system error message
                 perror("mkdir failed");
@@ -173,7 +183,7 @@ int main()
             // If the directory is successfully created, print confirmation
             else
             {
-                printf("Directory '%s' created successfully.\n", argument);
+                printf("Directory '%s' created successfully.\n", argument[0]);
             }
         }
         else if (strcmp(command, "jobs") == 0)
@@ -186,9 +196,19 @@ int main()
             // Skip the '!' character to get the real command
             char *newCommand = command + 1;
 
-            // Create the argument list for execvp
-            // newCommand = program name, argument = optional parameter, NULL terminates the array
-            char *args[] = {newCommand, argument, NULL};
+            // Create the argument list that will be passed to execvp
+            // execvp expects an array where:
+            // args[0] = program name
+            // args[1..n] = arguments
+            // last element must be NULL
+            char *args[12];
+            args[0] = newCommand;
+            // Copy all user-provided arguments into the args array
+            for (int j = 0; j < argsLen; j++)
+            {
+                args[j + 1] = argument[j];
+            }
+            args[argsLen + 1] = NULL; // Terminate the array with NULL as required by execvp
 
             // Create a new process
             int pid = fork();
