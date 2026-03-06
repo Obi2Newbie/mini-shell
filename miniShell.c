@@ -6,6 +6,10 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+#define MAX_JOBS 100
 
 /***
 pwd() retrieves the current working directory into a PATH_MAX-sized buffer using getcwd() and prints it to stdout as "Current working directory: ". If getcwd() fails it prints "Cannot get current working directory path" to stderr and returns.
@@ -22,6 +26,39 @@ void pwd()
         return;
     }
     printf("Current working directory: %s\n", buffer);
+}
+
+// Structure that represents a background job
+typedef struct {
+    pid_t pid;                 // Process ID of the job
+    char command[PATH_MAX];    // Command that started the process
+    int is_active;             // 1 if the process is still running, 0 if it finished
+} Job;
+
+// Array that stores all jobs
+Job jobList[MAX_JOBS];
+
+// Number of jobs currently stored in the list
+int jobCount = 0;
+
+
+// Function to display all jobs (internal shell command like `jobs`)
+void displayJobs() {
+
+    // Print table header
+    printf("\nID\tPID\tStatus\t\tCommand\n");
+
+    // Loop through all stored jobs
+    for (int i = 0; i < jobCount; i++) {
+
+        // Print job information
+        printf("[%d]\t%d\t%s\t%s\n", 
+               i + 1,                     // Job ID (index + 1 for user-friendly numbering)
+               jobList[i].pid,            // Process ID
+               jobList[i].is_active ?     // Check if job is active
+               "Running" : "Finished",    // Display status
+               jobList[i].command);       // Command used to start the job
+    }
 }
 
 int main()
@@ -140,6 +177,7 @@ int main()
         }
         else if (strcmp(command, "jobs") == 0)
         {
+            displayJobs();
         }
         else
         {
