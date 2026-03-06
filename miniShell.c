@@ -4,9 +4,11 @@
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-/*** 
-pwd() retrieves the current working directory into a PATH_MAX-sized buffer using getcwd() and prints it to stdout as "Current working directory: ". If getcwd() fails it prints "Cannot get current working directory path" to stderr and returns. 
+/***
+pwd() retrieves the current working directory into a PATH_MAX-sized buffer using getcwd() and prints it to stdout as "Current working directory: ". If getcwd() fails it prints "Cannot get current working directory path" to stderr and returns.
 ***/
 void pwd()
 {
@@ -20,7 +22,6 @@ void pwd()
         return;
     }
     printf("Current working directory: %s\n", buffer);
-
 }
 
 int main()
@@ -66,7 +67,7 @@ int main()
         // Store the last character of the input (used to detect '&')
         lastChar = userInput[stringLen - 1];
 
-        //The program is terminated if the user input either exit or EXIT
+        // The program is terminated if the user input either exit or EXIT
         if (strcmp(userInput, "exit") == 0 || strcmp(userInput, "EXIT") == 0)
         {
             break;
@@ -85,7 +86,7 @@ int main()
         argument = strtok(NULL, " ");
 
         // Compare the command entered by the user with supported commands
-        //We use string compare to check what the command the user has inputted
+        // We use string compare to check what the command the user has inputted
         if (strcmp(command, "?") == 0)
         {
             printf("\nHelp Menu:\n");
@@ -97,18 +98,18 @@ int main()
 
         else if (strcmp(command, "cd") == 0)
         {
-            //Check if the user has not inserted a path, if so the program output an error
+            // Check if the user has not inserted a path, if so the program output an error
             if (argument == NULL)
             {
                 printf("Error: cd require a path\n");
             }
-            //Execute the change directory method and also check for error
+            // Execute the change directory method and also check for error
             else if (chdir(argument) != 0)
             {
                 perror("cd failed");
                 continue;
             }
-            //If there is no error we output the new working directory
+            // If there is no error we output the new working directory
             pwd();
         }
 
@@ -119,6 +120,23 @@ int main()
 
         else if (strcmp(command, "mkdir") == 0)
         {
+            // Check if the user provided a directory name argument
+            // If no argument is given, print an error message
+            if (argument == NULL)
+            {
+                fprintf(stderr, "Error: mkdir requires a directory name\n");
+            }
+            // Attempt to create the new directory and set the standard read/write/execute (0777) permissions
+            else if (mkdir(argument, 0777) != 0)
+            {
+                // If mkdir fails, print the system error message
+                perror("mkdir failed");
+            }
+            // If the directory is successfully created, print confirmation
+            else
+            {
+                printf("Directory '%s' created successfully.\n", argument);
+            }
         }
         else if (strcmp(command, "jobs") == 0)
         {
