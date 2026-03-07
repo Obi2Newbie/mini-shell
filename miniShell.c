@@ -300,6 +300,7 @@ int main()
                     jobBuffer[slot].argument[k] = args[k];
                 }
 
+                //add the job inside the joblist so that it can be displayed if jobs is run
                 jobList[slot].is_active = 1; // 1 = Running
                 strncpy(jobList[slot].command, newCommand, PATH_MAX);
                 // Create a new thread that will run the background job
