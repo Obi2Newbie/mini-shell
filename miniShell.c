@@ -11,6 +11,7 @@
 #include <linux/limits.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 #define MAX_JOBS 100
 #define ARGS_LIMIT 10
@@ -108,17 +109,51 @@ void *runBackground(void *arg)
     // Parent process
     else
     {
-        //Update the list of jobs
+        // Update the list of jobs
         jobList[data->jobIndex].pid = pid;
         // Wait for the child process to finish execution
         wait(NULL);
-        //When the job is finished, we update the status
+        // When the job is finished, we update the status
         jobList[data->jobIndex].is_active = 0;
         // Notify that the background job has completed
         printf("\n[Background job finished: %s]\n", data->command);
     }
     // Return NULL because the thread function must return a void*
     return NULL;
+}
+
+// Helper function to handle redirection logic ('<' / '>')
+void handleRedirection(char *args[])
+{
+    for (int i = 0; args[i] != NULL; i++)
+    {
+        // Look for the output redirection symbol
+        if (strcmp(args[i], ">") == 0)
+        {
+            int fd = open(args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0)
+            {
+                perror("open output file");
+                exit(1);
+            }
+            dup2(fd, STDOUT_FILENO); // Redirect stdout to the file
+            close(fd);
+            args[i] = NULL; // Terminate command string before redirection symbol
+        }
+        // Look for the input redirection symbol
+        else if (strcmp(args[i], "<") == 0)
+        {
+            int fd = open(args[i + 1], O_RDONLY);
+            if (fd < 0)
+            {
+                perror("open input file");
+                exit(1);
+            }
+            dup2(fd, STDIN_FILENO); // Redirect stdin from the file
+            close(fd);
+            args[i] = NULL;
+        }
+    }
 }
 
 int main()
@@ -184,7 +219,7 @@ int main()
         // The program is terminated if the user input either exit or EXIT
         if (strcmp(userInput, "exit") == 0 || strcmp(userInput, "EXIT") == 0)
         {
-            break;
+            exit(0);
         }
 
         // check to see if the command should run in the background
@@ -281,13 +316,72 @@ int main()
             }
             args[argsLen + 1] = NULL; // Terminate the array with NULL as required by execvp
 
+            int pipePos = -1;
+            for (int j = 0; j < argsLen; j++)
+            {
+                if (strcmp(argument[j], "|") == 0)
+                {
+                    pipePos = j;
+                    break;
+                }
+            }
+
+            if (pipePos != -1)
+            {
+                // We found a pipe! Let's split the commands.
+                // cmd1_args is everything before the '|'
+                // cmd2_args is everything after the '|'
+                args[pipePos + 1] = NULL; // Terminate first command arguments
+                char *cmd2 = argument[pipePos + 1];
+                char **cmd2_args = &argument[pipePos + 1];
+
+                int pipefd[2];
+                if (pipe(pipefd) == -1)
+                {
+                    perror("pipe failed");
+                    continue;
+                }
+
+                // Fork the first process
+                int pid1 = fork();
+                if (pid1 == 0)
+                {
+                    // Redirect stdout to the pipe
+                    dup2(pipefd[1], STDOUT_FILENO);
+                    close(pipefd[0]); // Child doesn't need to read
+                    close(pipefd[1]); // Finished with original fd
+                    execvp(newCommand, args);
+                    perror("First command failed");
+                    exit(1);
+                }
+
+                // Fork the second process (The Reader)
+                pid_t pid2 = fork();
+                if (pid2 == 0)
+                {
+                    // Redirect stdin from the pipe
+                    dup2(pipefd[0], STDIN_FILENO);
+                    close(pipefd[1]); // Child doesn't need to write
+                    close(pipefd[0]); // Finished with original fd
+                    execvp(cmd2, cmd2_args);
+                    perror("Second command failed");
+                    exit(1);
+                }
+
+                // Parent process must close the pipe and wait
+                close(pipefd[0]);
+                close(pipefd[1]);
+                waitpid(pid1, NULL, 0);
+                waitpid(pid2, NULL, 0);
+            }
+
             // Check if the command should run in the background
             if (backgroundFlag)
             {
                 // Determine the slot in the job buffer using modulo to avoid overflow
                 // This allows the buffer to wrap around if MAX_JOBS is reached
                 int slot = jobCount % MAX_JOBS;
-                
+
                 //
                 jobBuffer[slot].jobIndex = slot;
                 // Copy the command name into the job buffer
@@ -296,11 +390,12 @@ int main()
 
                 // Copy the argument list into the job buffer
                 // The loop copies all arguments including the terminating NULL
-                for (int k = 0; k <= argsLen + 1; k++){
+                for (int k = 0; k <= argsLen + 1; k++)
+                {
                     jobBuffer[slot].argument[k] = args[k];
                 }
 
-                //add the job inside the joblist so that it can be displayed if jobs is run
+                // add the job inside the joblist so that it can be displayed if jobs is run
                 jobList[slot].is_active = 1; // 1 = Running
                 strncpy(jobList[slot].command, newCommand, PATH_MAX);
                 // Create a new thread that will run the background job
@@ -330,6 +425,7 @@ int main()
                 // Child process
                 else if (pid == 0)
                 {
+                    handleRedirection(args);
                     // Replace the child process with the new program
                     execvp(newCommand, args);
 
