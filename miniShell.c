@@ -9,6 +9,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <linux/limits.h>
+#include <pthread.h>
+#include <stdlib.h>
 
 #define MAX_JOBS 100
 #define ARGS_LIMIT 10
@@ -66,6 +68,59 @@ void displayJobs()
     }
 }
 
+// Structure used to store the command and its arguments for a background task
+typedef struct
+{
+    int jobIndex;
+    char command[PATH_MAX];         // Command to execute
+    char *argument[ARGS_LIMIT + 1]; // Array of arguments passed to execvp (NULL terminated)
+} Threads;
+
+// Buffer that stores background jobs waiting to be executed
+Threads jobBuffer[MAX_JOBS];
+
+// Signal handler that reaps finished child processes
+// wait(NULL) collects the exit status of any finished child
+void handler(int sig)
+{
+    wait(NULL);
+}
+
+// Function executed by a thread to run a background command
+void *runBackground(void *arg)
+{
+    // Cast the generic pointer to the Threads structure
+    Threads *data = arg;
+    // Create a new child process
+    int pid = fork();
+
+    // Child process
+    if (pid == 0)
+    {
+        // Replace the child process with the requested command
+        execvp(data->command, data->argument);
+
+        // If execvp returns, execution failed
+        perror("execvp failed");
+        exit(1);
+    }
+
+    // Parent process
+    else
+    {
+        //Update the list of jobs
+        jobList[data->jobIndex].pid = pid;
+        // Wait for the child process to finish execution
+        wait(NULL);
+        //When the job is finished, we update the status
+        jobList[data->jobIndex].is_active = 0;
+        // Notify that the background job has completed
+        printf("\n[Background job finished: %s]\n", data->command);
+    }
+    // Return NULL because the thread function must return a void*
+    return NULL;
+}
+
 int main()
 {
     // Buffer that stores the raw command entered by the user
@@ -75,10 +130,23 @@ int main()
     // argument: array of pointers to store the command arguments
     // ARGS_LIMIT defines the maximum number of arguments allowed
     char lastChar, *command, *argument[ARGS_LIMIT];
-    // Flag indicating whether the command should run in background
-    bool backgroundFlag = false;
     // Stores the length of the user input string
-    int stringLen = 0, argsLen = 0;
+    int stringLen = 0;
+
+    // Declare a sigaction structure used to configure the signal handler
+    struct sigaction sa;
+    // Assign the function 'handler' as the signal handler
+    // This function will be executed whenever the signal is received
+    sa.sa_handler = handler;
+    // Initialize the signal mask to empty
+    // This means no additional signals will be blocked while the handler runs
+    sigemptyset(&sa.sa_mask);
+    // Set signal handling flags
+    // SA_RESTART automatically restarts interrupted system calls (like read, fgets, etc.)
+    sa.sa_flags = SA_RESTART;
+    // Register the signal handler for SIGCHLD
+    // SIGCHLD is sent to the parent process when a child process terminates
+    sigaction(SIGCHLD, &sa, NULL);
 
     printf("Input your command.\n");
     printf("To stop the mini shell, type \"exit\"\n");
@@ -86,6 +154,9 @@ int main()
 
     while (1)
     {
+        // Flag indicating whether the command should run in background
+        bool backgroundFlag = false;
+        int argsLen = 0;
         // Display the shell prompt
         printf(">>>: ");
 
@@ -210,29 +281,67 @@ int main()
             }
             args[argsLen + 1] = NULL; // Terminate the array with NULL as required by execvp
 
-            // Create a new process
-            int pid = fork();
-
-            // Check if fork failed
-            if (pid < 0)
+            // Check if the command should run in the background
+            if (backgroundFlag)
             {
-                perror("fork failed"); // Print error message
-            }
-            // Child process
-            else if (pid == 0)
-            {
-                // Replace the child process with the new program
-                execvp(newCommand, args);
+                // Determine the slot in the job buffer using modulo to avoid overflow
+                // This allows the buffer to wrap around if MAX_JOBS is reached
+                int slot = jobCount % MAX_JOBS;
+                
+                //
+                jobBuffer[slot].jobIndex = slot;
+                // Copy the command name into the job buffer
+                // strncpy is used to avoid overflowing the command array
+                strncpy(jobBuffer[slot].command, newCommand, PATH_MAX);
 
-                // If execvp returns, it means it failed
-                perror("execvp failed");
-                break;
+                // Copy the argument list into the job buffer
+                // The loop copies all arguments including the terminating NULL
+                for (int k = 0; k <= argsLen + 1; k++){
+                    jobBuffer[slot].argument[k] = args[k];
+                }
+
+                jobList[slot].is_active = 1; // 1 = Running
+                strncpy(jobList[slot].command, newCommand, PATH_MAX);
+                // Create a new thread that will run the background job
+                pthread_t thread;
+                pthread_create(&thread, NULL, runBackground, &jobBuffer[slot]);
+
+                // Detach the thread so it cleans up automatically when it finishes
+                // This avoids needing pthread_join()
+                pthread_detach(thread);
+
+                // Inform the user that the job has started in the background
+                printf("[Job started in background]\n");
+
+                // Increment the total number of jobs started
+                jobCount++;
             }
-            // Parent process
             else
             {
-                // Wait for the child process to finish execution
-                wait(NULL);
+                // Create a new process
+                int pid = fork();
+
+                // Check if fork failed
+                if (pid < 0)
+                {
+                    perror("fork failed"); // Print error message
+                }
+                // Child process
+                else if (pid == 0)
+                {
+                    // Replace the child process with the new program
+                    execvp(newCommand, args);
+
+                    // If execvp returns, it means it failed
+                    perror("execvp failed");
+                    exit(1);
+                }
+                // Parent process
+                else
+                {
+                    // Wait for the child process to finish execution
+                    wait(NULL);
+                }
             }
         }
         else
