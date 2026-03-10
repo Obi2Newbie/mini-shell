@@ -27,7 +27,7 @@ gcc -pthread -o mini-shell miniShell.c
 - `jobs` - List background jobs
 - `exit` - Quit the shell
 - `![command]` - Execute external command
-- `[command] &` - Run in background
-- `[command1] | [command2]` - Pipe commands
-- `[command] > [file]` - Output redirection
-- `[command] < [file]` - Input redirection
+- `![command] &` - Run in background
+- `![command1] | [command2]` - Pipe commands
+- `![command] > [file]` - Output redirection
+- `![command] < [file]` - Input redirection

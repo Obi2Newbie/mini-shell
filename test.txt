@@ -1,0 +1,6 @@
+total 40
+-rwxrwxrwx 1 iliji iliji   931 Mar 10 08:45 README.md
+drwxrwxrwx 1 iliji iliji  4096 Mar 10 09:00 foo
+-rwxrwxrwx 1 iliji iliji 17328 Mar  7 15:40 miniShell
+-rwxrwxrwx 1 iliji iliji 15440 Mar 10 09:27 miniShell.c
+-rwxrwxrwx 1 iliji iliji     0 Mar 10 09:40 test.txt

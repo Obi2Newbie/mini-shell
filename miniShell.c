@@ -229,7 +229,7 @@ int main()
             userInput[stringLen - 1] = '\0';
         }
 
-        // Split the user input into tokens using space as delimiter
+        // Split the user input into tokens using space as delimitera
         // First token is the command
         command = strtok(userInput, " ");
         // Continue splitting the rest of the input into arguments
@@ -296,149 +296,119 @@ int main()
         {
             displayJobs();
         }
-        // Check if the command starts with '!' (used to execute a system command)
+        // Handle external commands (prefixed with '!')
         else if (command[0] == '!')
         {
-            // Skip the '!' character to get the real command
+            // Extract command without the '!' prefix
             char *newCommand = command + 1;
-
-            // Create the argument list that will be passed to execvp
-            // execvp expects an array where:
-            // args[0] = program name
-            // args[1..n] = arguments
-            // last element must be NULL
             char *args[12];
             args[0] = newCommand;
-            // Copy all user-provided arguments into the args array
+            
+            // Build arguments array
             for (int j = 0; j < argsLen; j++)
             {
-                args[j + 1] = argument[j];
+            args[j + 1] = argument[j];
             }
-            args[argsLen + 1] = NULL; // Terminate the array with NULL as required by execvp
+            args[argsLen + 1] = NULL;
 
+            // Check if pipe operator '|' is present
             int pipePos = -1;
             for (int j = 0; j < argsLen; j++)
             {
-                if (strcmp(argument[j], "|") == 0)
-                {
-                    pipePos = j;
-                    break;
-                }
+            if (strcmp(argument[j], "|") == 0)
+            {
+                pipePos = j;
+                break;
+            }
             }
 
+            // Handle piped commands
             if (pipePos != -1)
             {
-                // We found a pipe! Let's split the commands.
-                // cmd1_args is everything before the '|'
-                // cmd2_args is everything after the '|'
-                args[pipePos + 1] = NULL; // Terminate first command arguments
-                char *cmd2 = argument[pipePos + 1];
-                char **cmd2_args = &argument[pipePos + 1];
+            // Terminate first command arguments at pipe position
+            args[pipePos + 1] = NULL;
 
-                int pipefd[2];
-                if (pipe(pipefd) == -1)
-                {
-                    perror("pipe failed");
-                    continue;
-                }
+            // Prepare second command
+            char *cmd2 = argument[pipePos + 1];
+            if (cmd2[0] == '!') cmd2++;
+            
+            char **cmd2_args = &argument[pipePos + 1];
+            if (cmd2_args[0][0] == '!') cmd2_args[0]++;
 
-                // Fork the first process
-                int pid1 = fork();
-                if (pid1 == 0)
-                {
-                    // Redirect stdout to the pipe
-                    dup2(pipefd[1], STDOUT_FILENO);
-                    close(pipefd[0]); // Child doesn't need to read
-                    close(pipefd[1]); // Finished with original fd
-                    execvp(newCommand, args);
-                    perror("First command failed");
-                    exit(1);
-                }
+            // Create pipe
+            int pipefd[2];
+            if (pipe(pipefd) == -1)
+            {
+                perror("pipe failed");
+                continue;
+            }
 
-                // Fork the second process (The Reader)
-                pid_t pid2 = fork();
-                if (pid2 == 0)
-                {
-                    // Redirect stdin from the pipe
-                    dup2(pipefd[0], STDIN_FILENO);
-                    close(pipefd[1]); // Child doesn't need to write
-                    close(pipefd[0]); // Finished with original fd
-                    execvp(cmd2, cmd2_args);
-                    perror("Second command failed");
-                    exit(1);
-                }
-
-                // Parent process must close the pipe and wait
+            // Fork first command process
+            int pid1 = fork();
+            if (pid1 == 0)
+            {
+                dup2(pipefd[1], STDOUT_FILENO);
                 close(pipefd[0]);
                 close(pipefd[1]);
-                waitpid(pid1, NULL, 0);
-                waitpid(pid2, NULL, 0);
+                execvp(newCommand, args);
+                perror("First command failed");
+                exit(1);
             }
 
-            // Check if the command should run in the background
+            // Fork second command process
+            int pid2 = fork();
+            if (pid2 == 0)
+            {
+                dup2(pipefd[0], STDIN_FILENO);
+                close(pipefd[1]);
+                close(pipefd[0]);
+                execvp(cmd2, cmd2_args);
+                perror("Second command failed");
+                exit(1);
+            }
+
+            // Close pipes in parent and wait for both children
+            close(pipefd[0]);
+            close(pipefd[1]);
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
+
+            continue;
+            }
+
+            // Handle background execution
             if (backgroundFlag)
             {
-                // Determine the slot in the job buffer using modulo to avoid overflow
-                // This allows the buffer to wrap around if MAX_JOBS is reached
-                int slot = jobCount % MAX_JOBS;
+            int slot = jobCount % MAX_JOBS;
+            jobBuffer[slot].jobIndex = slot;
+            strncpy(jobBuffer[slot].command, newCommand, PATH_MAX);
 
-                //
-                jobBuffer[slot].jobIndex = slot;
-                // Copy the command name into the job buffer
-                // strncpy is used to avoid overflowing the command array
-                strncpy(jobBuffer[slot].command, newCommand, PATH_MAX);
-
-                // Copy the argument list into the job buffer
-                // The loop copies all arguments including the terminating NULL
-                for (int k = 0; k <= argsLen + 1; k++)
-                {
-                    jobBuffer[slot].argument[k] = args[k];
-                }
-
-                // add the job inside the joblist so that it can be displayed if jobs is run
-                jobList[slot].is_active = 1; // 1 = Running
-                strncpy(jobList[slot].command, newCommand, PATH_MAX);
-                // Create a new thread that will run the background job
-                pthread_t thread;
-                pthread_create(&thread, NULL, runBackground, &jobBuffer[slot]);
-
-                // Detach the thread so it cleans up automatically when it finishes
-                // This avoids needing pthread_join()
-                pthread_detach(thread);
-
-                // Inform the user that the job has started in the background
-                printf("[Job started in background]\n");
-
-                // Increment the total number of jobs started
-                jobCount++;
+            for (int k = 0; k <= argsLen + 1; k++)
+            {
+                jobBuffer[slot].argument[k] = args[k];
             }
+
+            jobList[slot].is_active = 1;
+            strncpy(jobList[slot].command, newCommand, PATH_MAX);
+            pthread_t thread;
+            pthread_create(&thread, NULL, runBackground, &jobBuffer[slot]);
+            pthread_detach(thread);
+            printf("[Job started in background]\n");
+            jobCount++;
+            }
+            // Handle foreground execution
             else
             {
-                // Create a new process
-                int pid = fork();
-
-                // Check if fork failed
-                if (pid < 0)
-                {
-                    perror("fork failed"); // Print error message
-                }
-                // Child process
-                else if (pid == 0)
-                {
-                    handleRedirection(args);
-                    // Replace the child process with the new program
-                    execvp(newCommand, args);
-
-                    // If execvp returns, it means it failed
-                    perror("execvp failed");
-                    exit(1);
-                }
-                // Parent process
-                else
-                {
-                    // Wait for the child process to finish execution
-                    wait(NULL);
-                }
+            int pid = fork();
+            if (pid < 0) perror("fork failed");
+            else if (pid == 0)
+            {
+                handleRedirection(args);
+                execvp(newCommand, args);
+                perror("execvp failed");
+                exit(1);
+            }
+            else wait(NULL);
             }
         }
         else
